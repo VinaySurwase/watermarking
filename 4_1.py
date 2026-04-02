@@ -406,49 +406,95 @@ def embed_watermark(
 #  ALGORITHM 2 – EXTRACTION
 # ══════════════════════════════════════════════════════════════════════════════
 
-def extract_watermark(
-    watermarked_path : str,
-    key              : EmbedKey,
-    output_path      : str = "extracted_watermark.png",
-) -> np.ndarray:
-    """Extract watermark following Algorithm 2."""
 
-    print("[Alg2 / L1-8]  Forward pipeline on watermarked image …")
-    # Iw = _load_gray(watermarked_path, key.M)
+def extract_watermark(watermarked_path: str, key: EmbedKey,
+                      output_path: str = "extracted_watermark.png") -> np.ndarray:
+
+    print("[Alg2] Forward pipeline …")
     Iw = resize(watermarked_path)
-    _, HSw_hat_list, _, _, _, _, _, _ = _forward_pipeline(
+
+    _, HSw_hat_list, *_ = _forward_pipeline(
         Iw, key.block_size, key.dtcwt_levels
     )
 
-    print(f"[Alg2 / L10-12]  Recovering watermark SVs (α* = {key.alpha_star:.6f}) …")
-    Sw_prime_list = [
-        (hsw_hat - hsw) / key.alpha_star
-        for hsw_hat, hsw in zip(HSw_hat_list, key.HSw_list)
-    ]
+    print(f"[Alg2] Recovering SVs (α* = {key.alpha_star:.6f}) …")
 
-    print("[Alg2 / L13-14]  ISVD reconstruction of W_enc …")
-    H_wm, W_wm = key.watermark_shape
-    k           = min(key.Uw.shape[1], key.Vtw.shape[0])
-    Cw_accum    = np.zeros((H_wm, W_wm), dtype=np.float64)
-    for sw_prime in Sw_prime_list:
-        sv_k                        = np.zeros(k)
-        sv_k[:min(k, len(sw_prime))] = sw_prime[:k]
-        contrib                     = _isvd(key.Uw[:, :k], sv_k, key.Vtw[:k, :])
-        rh = min(H_wm, contrib.shape[0])
-        rw = min(W_wm, contrib.shape[1])
-        Cw_accum[:rh, :rw] += contrib[:rh, :rw]
-    Cw = Cw_accum / max(len(Sw_prime_list), 1)
+    # vectorized
+    HSw_hat = np.array(HSw_hat_list)
+    HSw     = np.array(key.HSw_list)
 
-    print("[Alg2 / L15]  Henon decryption …")
-    W_ext  = henon_decrypt(Cw, a=key.henon_a, b=key.henon_b)
+    Sw_prime = (HSw_hat - HSw) / key.alpha_star   # (B, k)
+
+    print("[Alg2] Fast ISVD reconstruction …")
+
+    # average singular values
+    sv_mean = np.mean(Sw_prime, axis=0)
+
+    k = min(key.Uw.shape[1], key.Vtw.shape[0])
+    sv_k = np.zeros(k)
+    sv_k[:min(k, len(sv_mean))] = sv_mean[:k]
+
+    # single reconstruction
+    Cw = _isvd(key.Uw[:, :k], sv_k, key.Vtw[:k, :])
+
+    print("[Alg2] Henon decryption …")
+
+    W_ext = henon_decrypt(Cw, a=key.henon_a, b=key.henon_b)
+
     W_norm = W_ext - W_ext.min()
     if W_norm.max() > 0:
         W_norm /= W_norm.max()
+
     W_out = (W_norm * 255).astype(np.uint8)
 
     Image.fromarray(W_out).save(output_path)
-    print(f"[Alg2 / L16]  Extracted watermark saved → {output_path}")
+    print(f"[Alg2] Saved → {output_path}")
+
     return W_out
+
+# def extract_watermark(
+#     watermarked_path : str,
+#     key              : EmbedKey,
+#     output_path      : str = "extracted_watermark.png",
+# ) -> np.ndarray:
+#     """Extract watermark following Algorithm 2."""
+
+#     print("[Alg2 / L1-8]  Forward pipeline on watermarked image …")
+#     # Iw = _load_gray(watermarked_path, key.M)
+#     Iw = resize(watermarked_path)
+#     _, HSw_hat_list, _, _, _, _, _, _ = _forward_pipeline(
+#         Iw, key.block_size, key.dtcwt_levels
+#     )
+
+#     print(f"[Alg2 / L10-12]  Recovering watermark SVs (α* = {key.alpha_star:.6f}) …")
+#     Sw_prime_list = [
+#         (hsw_hat - hsw) / key.alpha_star
+#         for hsw_hat, hsw in zip(HSw_hat_list, key.HSw_list)
+#     ]
+
+#     print("[Alg2 / L13-14]  ISVD reconstruction of W_enc …")
+#     H_wm, W_wm = key.watermark_shape
+#     k           = min(key.Uw.shape[1], key.Vtw.shape[0])
+#     Cw_accum    = np.zeros((H_wm, W_wm), dtype=np.float64)
+#     for sw_prime in Sw_prime_list:
+#         sv_k                        = np.zeros(k)
+#         sv_k[:min(k, len(sw_prime))] = sw_prime[:k]
+#         contrib                     = _isvd(key.Uw[:, :k], sv_k, key.Vtw[:k, :])
+#         rh = min(H_wm, contrib.shape[0])
+#         rw = min(W_wm, contrib.shape[1])
+#         Cw_accum[:rh, :rw] += contrib[:rh, :rw]
+#     Cw = Cw_accum / max(len(Sw_prime_list), 1)
+
+#     print("[Alg2 / L15]  Henon decryption …")
+#     W_ext  = henon_decrypt(Cw, a=key.henon_a, b=key.henon_b)
+#     W_norm = W_ext - W_ext.min()
+#     if W_norm.max() > 0:
+#         W_norm /= W_norm.max()
+#     W_out = (W_norm * 255).astype(np.uint8)
+
+#     Image.fromarray(W_out).save(output_path)
+#     print(f"[Alg2 / L16]  Extracted watermark saved → {output_path}")
+#     return W_out
 
 
 # ══════════════════════════════════════════════════════════════════════════════
