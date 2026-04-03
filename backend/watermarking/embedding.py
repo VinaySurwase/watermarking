@@ -197,112 +197,213 @@ def psnr(original: np.ndarray, modified: np.ndarray) -> float:
     return float("inf") if mse == 0 else 10.0 * np.log10(255.0 ** 2 / mse)
 
 def embed_watermark(
-    host_path        : str,
-    watermark_path   : str,
-    M                : int   = 512,
-    block_size       : int   = 8,
-    dtcwt_levels     : int   = 3,
-    henon_a          : float = 1.4,
-    henon_b          : float = 0.3,
-    pso_particles    : int   = 20,
-    pso_iters        : int   = 50,
-    alpha_bounds     : tuple = (0.001, 0.05),
-    tamper_threshold : float = 3.0,
-    output_path      : str   = "watermarked.png",
+    host_path: str,
+    watermark_path: str,
+    process_id: int,
+    M: int = 512,
+    block_size: int = 8,
+    dtcwt_levels: int = 3,
+    henon_a: float = 1.4,
+    henon_b: float = 0.3,
+    pso_particles: int = 20,
+    pso_iters: int = 50,
+    alpha_bounds: tuple = (0.001, 0.05),
+    tamper_threshold: float = 3.0,
+    output_path: str = "watermarked.png",
 ) -> tuple:
-    
-    print("Step-1 Resizing the image")
-    I = resize(host_path)
-    # logic to change the status and store resized image.
-     
-    print("Step - 2 Forward pipeline")
-    U_list, HSw_list, Vt_list, dct_blocks, positions, LL, highpasses, tr = \
-        _forward_pipeline(I, block_size, dtcwt_levels)
-    n_blocks = len(HSw_list)
-    LL_shape = LL.shape
-    sv_len   = len(HSw_list[0])
-    # Logic to change the status and store n_blocks, LL_shape, sv_len
 
-    print("Step - 3  Henon encrypting")
-    wm_side = max(int(np.sqrt(n_blocks)) * block_size, block_size)
-    W_raw   = _load_gray(watermark_path, wm_side)
-    W_enc   = henon_encrypt(W_raw, a=henon_a, b=henon_b)
-    # Logic to change the status and store w raw and w enc
+    from .models import ImageProcess
+    from django.core.files.base import ContentFile
+    import tempfile
+    import numpy as np
+    from PIL import Image
 
-    print("Step - 4 SVD on encrypted watermark")
-    Uw, Sw_full, Vtw = _svd(W_enc)
-    total_needed = n_blocks * sv_len
-    Sw_tiled     = np.tile(Sw_full,
-                           int(np.ceil(total_needed / max(len(Sw_full), 1))))
-    wm_sv_list   = [
-        Sw_tiled[i * sv_len: i * sv_len + sv_len].copy()
-        for i in range(n_blocks)
-    ]
-    # Logic to change the status
-    
-    print("Step - 5 PSO optimising")
-    optimizer = GlobalBestPSO(
-        n_particles = pso_particles,
-        dimensions  = 1,
-        options     = {"c1": 0.5, "c2": 0.3, "w": 0.9},
-        bounds      = (np.array([alpha_bounds[0]]), np.array([alpha_bounds[1]])),
-    )
-    cost, best = optimizer.optimize(
-        lambda a: _fitness(a, HSw_list, wm_sv_list, U_list, Vt_list, dct_blocks),
-        iters=pso_iters, verbose=False,
-    )
-    alpha_star = float(best[0])
-    print(f"α* = {alpha_star:.6f}  (PSO cost = {cost:.4f})")
-    # Logic to change the status and store alpha and PSO cost.
+    process = ImageProcess.objects.get(id=process_id)
 
-    print("Step - 6 Embedding")
-    new_dct_blocks    = []
-    HSw_new_dominant  = np.empty(n_blocks, dtype=np.float64)   
+    try:
+        # =====================================================
+        # 🔹 STEP 1: RESIZE
+        # =====================================================
+        process.set_status(ImageProcess.Status.RESIZING, 10)
 
-    for idx, (hsw, sw, U, Vt) in enumerate(zip(HSw_list, wm_sv_list, U_list, Vt_list)):
-        hsw_new = hsw + alpha_star * sw                         
-        C_new   = _isvd(U, hsw_new, Vt)
-        new_dct_blocks.append(C_new)
-        HSw_new_dominant[idx] = hsw_new[0]
+        I = resize(host_path)
 
-    Iw = _inverse_pipeline(new_dct_blocks, positions, LL_shape, highpasses, tr, block_size)
-    Iw_uint8 = np.clip(Iw, 0, 255).astype(np.uint8)
-    Image.fromarray(Iw_uint8).save(output_path)
+        # save resized image
+        temp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        Image.fromarray(I.astype(np.uint8)).save(temp.name)
+        with open(temp.name, "rb") as f:
+            process.resized_image.save(f"resized_{process.id}.png", ContentFile(f.read()), save=False)
 
-    _psnr = psnr(I, Iw_uint8.astype(np.float64))
-    print(f"Saved → {output_path}   PSNR = {_psnr:.2f} dB")
-    # Logic to change the status and save the psnr valuse and watermarked Image.
-    
-    print("Step - 7 give name")
-    Iw_reloaded = resize(output_path)
-    _, sv_reload, _, _, _, _, _, _ = _forward_pipeline(
-        Iw_reloaded, block_size, dtcwt_levels
-    )
-    drift = np.array([abs(sv_reload[i][0] - HSw_new_dominant[i])
-                      for i in range(n_blocks)])
-    max_benign_drift = float(drift.max())
-    
-    auto_threshold  = max_benign_drift * 2.5
-    final_threshold = max(tamper_threshold, auto_threshold)
-    print(f"           PNG round-trip max SV drift : {max_benign_drift:.4f}")
-    print(f"           Auto threshold              : {auto_threshold:.4f}")
-    print(f"           Final tamper threshold T    : {final_threshold:.4f}")
+        process.M = M
+        process.block_size = block_size
+        process.dtcwt_levels = dtcwt_levels
+        process.save()
 
-    key = EmbedKey(
-        alpha_star        = alpha_star,
-        HSw_list          = HSw_list,
-        HSw_new_dominant  = HSw_new_dominant,    # exact float64 per-block SVs
-        tamper_threshold  = final_threshold,     # calibrated T
-        wm_sv_list        = wm_sv_list,
-        Uw                = Uw,
-        Vtw               = Vtw,
-        watermark_shape   = W_enc.shape,
-        henon_a           = henon_a,
-        henon_b           = henon_b,
-        M                 = M,
-        block_size        = block_size,
-        dtcwt_levels      = dtcwt_levels,
-    )
-    
-    return Iw_uint8, key
+        # =====================================================
+        # 🔹 STEP 2: FORWARD PIPELINE
+        # =====================================================
+        process.set_status(ImageProcess.Status.FORWARDING, 25)
+
+        U_list, HSw_list, Vt_list, dct_blocks, positions, LL, highpasses, tr = \
+            _forward_pipeline(I, block_size, dtcwt_levels)
+
+        n_blocks = len(HSw_list)
+        LL_shape = LL.shape
+        sv_len = len(HSw_list[0])
+
+        process.n_blocks = n_blocks
+        process.sv_length = sv_len
+        process.LL_shape_h = LL_shape[0]
+        process.LL_shape_w = LL_shape[1]
+        process.save()
+
+        # =====================================================
+        # 🔹 STEP 3: ENCRYPTION
+        # =====================================================
+        process.set_status(ImageProcess.Status.ENCRYPTING, 40)
+
+        wm_side = max(int(np.sqrt(n_blocks)) * block_size, block_size)
+        W_raw = _load_gray(watermark_path, wm_side)
+        W_enc = henon_encrypt(W_raw, a=henon_a, b=henon_b)
+
+        # save W_raw
+        temp_raw = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        Image.fromarray(W_raw.astype(np.uint8)).save(temp_raw.name)
+        with open(temp_raw.name, "rb") as f:
+            process.watermark_raw.save(f"w_raw_{process.id}.png", ContentFile(f.read()), save=False)
+
+        # save W_enc
+        temp_enc = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        Image.fromarray((W_enc * 255).astype(np.uint8)).save(temp_enc.name)
+        with open(temp_enc.name, "rb") as f:
+            process.watermark_encrypted.save(f"w_enc_{process.id}.png", ContentFile(f.read()), save=False)
+
+        process.henon_a = henon_a
+        process.henon_b = henon_b
+        process.watermark_shape = list(W_enc.shape)
+        process.save()
+
+        # =====================================================
+        # 🔹 STEP 4: SVD
+        # =====================================================
+        process.set_status(ImageProcess.Status.SVD, 55)
+
+        Uw, Sw_full, Vtw = _svd(W_enc)
+
+        total_needed = n_blocks * sv_len
+        Sw_tiled = np.tile(Sw_full, int(np.ceil(total_needed / len(Sw_full))))
+
+        wm_sv_list = [
+            Sw_tiled[i * sv_len: i * sv_len + sv_len].copy()
+            for i in range(n_blocks)
+        ]
+
+        # =====================================================
+        # 🔹 STEP 5: PSO
+        # =====================================================
+        process.set_status(ImageProcess.Status.PSO, 70)
+
+        optimizer = GlobalBestPSO(
+            n_particles=pso_particles,
+            dimensions=1,
+            options={"c1": 0.5, "c2": 0.3, "w": 0.9},
+            bounds=(np.array([alpha_bounds[0]]), np.array([alpha_bounds[1]])),
+        )
+
+        cost, best = optimizer.optimize(
+            lambda a: _fitness(a, HSw_list, wm_sv_list, U_list, Vt_list, dct_blocks),
+            iters=pso_iters, verbose=False,
+        )
+
+        alpha_star = float(best[0])
+
+        process.alpha_star = alpha_star
+        process.pso_cost = float(cost)
+        process.pso_particles = pso_particles
+        process.pso_iterations = pso_iters
+        process.save()
+
+        # =====================================================
+        # 🔹 STEP 6: EMBEDDING
+        # =====================================================
+        process.set_status(ImageProcess.Status.EMBEDDING, 85)
+
+        new_dct_blocks = []
+        HSw_new_dominant = np.empty(n_blocks, dtype=np.float64)
+
+        for idx, (hsw, sw, U, Vt) in enumerate(zip(HSw_list, wm_sv_list, U_list, Vt_list)):
+            hsw_new = hsw + alpha_star * sw
+            C_new = _isvd(U, hsw_new, Vt)
+            new_dct_blocks.append(C_new)
+            HSw_new_dominant[idx] = hsw_new[0]
+
+        Iw = _inverse_pipeline(new_dct_blocks, positions, LL_shape, highpasses, tr, block_size)
+        Iw_uint8 = np.clip(Iw, 0, 255).astype(np.uint8)
+
+        # save output image
+        temp_out = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        Image.fromarray(Iw_uint8).save(temp_out.name)
+        with open(temp_out.name, "rb") as f:
+            process.watermarked_image.save(f"output_{process.id}.png", ContentFile(f.read()), save=False)
+
+        _psnr = psnr(I, Iw_uint8.astype(np.float64))
+        process.psnr_value = float(_psnr)
+        process.save()
+
+        # =====================================================
+        # 🔹 STEP 7: THRESHOLD
+        # =====================================================
+        Iw_reloaded = resize(temp_out.name)
+
+        _, sv_reload, _, _, _, _, _, _ = _forward_pipeline(
+            Iw_reloaded, block_size, dtcwt_levels
+        )
+
+        drift = np.array([
+            abs(sv_reload[i][0] - HSw_new_dominant[i])
+            for i in range(n_blocks)
+        ])
+
+        max_benign_drift = float(drift.max())
+        auto_threshold = max_benign_drift * 2.5
+        final_threshold = max(tamper_threshold, auto_threshold)
+
+        process.max_benign_drift = max_benign_drift
+        process.auto_threshold = auto_threshold
+        process.final_threshold = final_threshold
+        process.tamper_threshold = final_threshold
+
+        # =====================================================
+        # 🔹 SAVE KEY (.npz)
+        # =====================================================
+        key_path = tempfile.NamedTemporaryFile(suffix=".npz", delete=False).name
+
+        np.savez(
+            key_path,
+            alpha_star=alpha_star,
+            HSw_new_dominant=HSw_new_dominant,
+            tamper_threshold=final_threshold,
+            Uw=Uw,
+            Vtw=Vtw,
+            watermark_shape=W_enc.shape,
+            henon_a=henon_a,
+            henon_b=henon_b,
+            M=M,
+            block_size=block_size,
+            dtcwt_levels=dtcwt_levels,
+        )
+
+        with open(key_path, "rb") as f:
+            process.key_file.save(f"key_{process.id}.npz", ContentFile(f.read()), save=False)
+
+        # =====================================================
+        # 🔹 COMPLETE
+        # =====================================================
+        process.set_status(ImageProcess.Status.COMPLETED, 100)
+
+        return Iw_uint8, None
+
+    except Exception as e:
+        process.mark_failed(str(e))
+        raise
 
