@@ -2,6 +2,7 @@ from django.urls import path
 from .upload_view import *
 from .extract_view import *
 from .verify_view import *
+from .compare_view import compare_images
 
 urlpatterns = [
     path("upload/", upload_images, name="upload_images"),
@@ -85,4 +86,9 @@ urlpatterns += [
         get_extract_output_image,
         name="get_extract_output_image",
     ),
+]
+
+# ── Compare ──────────────────────────────────────────────────────
+urlpatterns += [
+    path("compare/", compare_images, name="compare_images"),
 ]

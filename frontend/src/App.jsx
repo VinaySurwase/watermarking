@@ -6,6 +6,7 @@ import Register from "./pages/Register";
 import Upload from "./pages/Upload";
 import Verify from "./pages/Verify";
 import ExtractUpload from "./pages/Extractupload"
+import Compare from "./pages/Compare"
 
 function PrivateRoute({ children }) {
   const token = localStorage.getItem("token");
@@ -50,6 +51,14 @@ export default function App() {
           element={
             <PrivateRoute>
               <ExtractUpload />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/compare"
+          element={
+            <PrivateRoute>
+              <Compare />
             </PrivateRoute>
           }
         />
