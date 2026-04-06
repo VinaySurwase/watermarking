@@ -33,6 +33,7 @@ from .models import (
     path_verify_overlay,
 )
 
+from .utility import reconstruct_full_image,getImg
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  INTERNAL HELPERS
@@ -47,7 +48,7 @@ def _save_png(path: str, img_bgr: np.ndarray) -> None:
 
 
 def _build_tamper_map(
-    tamper_grid: np.ndarray,   # (n_rows, n_cols) bool
+    tamper_grid: np.ndarray,  
     cell_px: int,
     out_w: int,
     out_h: int,
@@ -206,8 +207,8 @@ def verify_tamper(
     print("[verify_tamper / S1]  Loading received image …")
     _tick(10)
 
-    img_recv = resize(received_path)   # float32 grayscale, padded
-
+    img_recv = getImg(received_path)  
+    img_recv = reconstruct_full_image(img_recv,key)
     # ── Step 2: forward pipeline ─────────────────────────────────────────────
     print("[verify_tamper / S2]  Running forward pipeline …")
     _tick(25)

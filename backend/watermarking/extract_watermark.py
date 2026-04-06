@@ -33,7 +33,7 @@ from .embedding import (
     resize,
 )
 from .models import WatermarkExtraction
-
+from .utility import reconstruct_full_image,getImg
 
 # ═════════════════════════════════════════════════════════════════════════════
 #  INTERNAL HELPERS
@@ -78,7 +78,7 @@ def extract_watermark(
     W_out : uint8 ndarray of the recovered watermark
     """
 
-    # ── optional DB handle ────────────────────────────────────────────────────
+   
     extraction: WatermarkExtraction | None = None
     if extraction_id is not None:
         try:
@@ -86,54 +86,55 @@ def extract_watermark(
         except WatermarkExtraction.DoesNotExist:
             extraction = None
 
-    # ── Step 1: load & resize watermarked image ───────────────────────────────
-    print("[Alg2 / S1]  Loading watermarked image …")
+    # =====================================================
+    # 🔹 STEP 1: load & resize watermarked image
+    # =====================================================
     _tick(extraction, 10)
 
-    Iw = resize(watermarked_path)
-
-    # ── Step 2: forward pipeline → per-block SVs ─────────────────────────────
-    print("[Alg2 / S2]  Forward pipeline (DTCWT → DCT → SVD) …")
+    Iw = getImg(watermarked_path)
+    Iw = reconstruct_full_image(Iw,key)
+    # =====================================================
+    # 🔹 STEP 2: forward pipeline → per-block SVs
+    # =====================================================
     _tick(extraction, 25)
 
-    _, HSw_hat_list, _, _, positions, LL, highpasses, tr = _forward_pipeline(
-        Iw, key.block_size, key.dtcwt_levels
-    )
+    _, HSw_hat_list, _, _, positions, LL, highpasses, tr = _forward_pipeline(Iw, key.block_size, key.dtcwt_levels)
 
     n_blocks = len(HSw_hat_list)
     sv_len   = len(HSw_hat_list[0])
-    print(f"           Blocks = {n_blocks}  |  α* = {key.alpha_star:.6f}")
 
-    # ── Step 3: recover watermark singular values ─────────────────────────────
-    #   Sw'[i] = (HSw_hat[i] - HSw[i]) / α*
-    #   HSw is not stored in the key; key.HSw_list holds the original SVs
-    print("[Alg2 / S3]  Recovering watermark SVs …")
+    # =====================================================
+    # 🔹 STEP 3: recover watermark singular values
+    # =====================================================
     _tick(extraction, 45)
 
-    HSw_hat = np.array(HSw_hat_list)              # (B, k)
-    HSw     = np.array(key.HSw_list)              # (B, k)  — original SVs
-    Sw_prime = (HSw_hat - HSw) / key.alpha_star   # (B, k)
+    HSw_hat = np.array(HSw_hat_list)              
+    HSw     = np.array(key.HSw_list)              
+    Sw_prime = (HSw_hat - HSw) / key.alpha_star   
 
-    # ── Step 4: average → single ISVD reconstruction ─────────────────────────
-    print("[Alg2 / S4]  ISVD reconstruction …")
+    # =====================================================
+    # 🔹 STEP 4: average → single ISVD reconstruction
+    # =====================================================
     _tick(extraction, 60)
 
-    sv_mean = np.mean(Sw_prime, axis=0)                   # (k,)
+    sv_mean = np.mean(Sw_prime, axis=0)                   
 
-    k    = min(key.Uw.shape[1], key.Vtw.shape[0])
+    k = min(key.Uw.shape[1], key.Vtw.shape[0])
     sv_k = np.zeros(k)
     sv_k[:min(k, len(sv_mean))] = sv_mean[:k]
 
-    Cw = _isvd(key.Uw[:, :k], sv_k, key.Vtw[:k, :])     # reconstructed DCT block
+    Cw = _isvd(key.Uw[:, :k], sv_k, key.Vtw[:k, :])   
 
-    # ── Step 5: Henon decrypt ─────────────────────────────────────────────────
-    print("[Alg2 / S5]  Henon decryption …")
+    # =====================================================
+    # 🔹 STEP 5: Henon decrypt
+    # =====================================================
     _tick(extraction, 75)
 
     W_ext = henon_decrypt(Cw, a=key.henon_a, b=key.henon_b)
 
-    # ── Step 6: normalise & save ──────────────────────────────────────────────
-    print("[Alg2 / S6]  Normalising and saving …")
+    # =====================================================
+    # 🔹 STEP 6: normalise & save
+    # =====================================================
     _tick(extraction, 88)
 
     W_norm = W_ext - W_ext.min()
@@ -142,15 +143,15 @@ def extract_watermark(
     W_out = (W_norm * 255).astype(np.uint8)
 
     _save_png(output_path, W_out)
-    print(f"           Saved → {output_path}")
 
-    # ── Step 7: write metadata back to DB row ────────────────────────────────
+    # =====================================================
+    # 🔹 STEP 7: write metadata back to DB row
+    # =====================================================
     if extraction is not None:
         extraction.alpha_star      = float(key.alpha_star)
         extraction.n_blocks        = int(n_blocks)
         extraction.sv_length       = int(sv_len)
         extraction.watermark_shape = list(W_out.shape)
         extraction.set_status(WatermarkExtraction.Status.COMPLETED, 100)
-        print("[Alg2]  DB row updated → COMPLETED")
 
     return W_out

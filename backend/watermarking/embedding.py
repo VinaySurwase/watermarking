@@ -27,6 +27,14 @@ class EmbedKey:
     M                 : int   = 512
     block_size        : int   = 8
     dtcwt_levels      : int   = 3
+    
+    orig_H            : int = 0
+    orig_W            : int = 0
+    pad_h             : int = 0
+    pad_w             : int = 0
+
+    bottom_pad        : np.ndarray = None
+    right_pad         : np.ndarray = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -125,6 +133,28 @@ def resize(image_path):
     )
 
     return padded.astype(np.float32)
+
+def resize2(image_path):
+    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+
+    if img is None:
+        raise ValueError("Image not found or invalid path")
+
+    H, W = img.shape
+
+    M = math.ceil(max(H, W) / 64) * 64
+
+    pad_h = M - H
+    pad_w = M - W
+
+    padded = np.pad(
+        img,
+        ((0, pad_h), (0, pad_w)),
+        mode='constant',
+        constant_values=0
+    )
+
+    return padded.astype(np.float32), (H, W, pad_h, pad_w)
 
 def _load_gray(path: str, size: int) -> np.ndarray:
     """Load image, convert to grayscale, resize, return float64."""
@@ -251,7 +281,8 @@ def embed_watermark(
         process.set_status(ImageProcess.Status.RESIZING, 10)
         process.save()
 
-        I = resize(host_path)
+        I, pad_info = resize2(host_path)
+        orig_H, orig_W, pad_h, pad_w = pad_info
 
         # save resized image
         # filename = get_filename("resized.png")
@@ -361,11 +392,20 @@ def embed_watermark(
 
         Iw = _inverse_pipeline(new_dct_blocks, positions, LL_shape, highpasses, tr, block_size)
         Iw_uint8 = np.clip(Iw, 0, 255).astype(np.uint8)
+        H, W = Iw_uint8.shape
+
+        # Extract padded regions
+        bottom_pad = Iw_uint8[orig_H:H, :] if pad_h > 0 else None
+        right_pad  = Iw_uint8[:, orig_W:W] if pad_w > 0 else None
+        corner_pad = Iw_uint8[orig_H:H, orig_W:W] if (pad_h > 0 and pad_w > 0) else None
+        
+        Iw_cropped = Iw_uint8[:orig_H, :orig_W]
 
         # save output image
         # filename = get_filename("output.png")
         # process.watermarked_image.save(filename, numpy_to_png_file(Iw_uint8),True)
-        save_image(path_output(process),Iw_uint8)
+        # save_image(path_output(process),Iw_uint8)
+        save_image(path_output(process), Iw_cropped)
 
         _psnr = psnr(I, Iw_uint8.astype(np.float64))
         process.psnr_value = float(_psnr)
@@ -417,6 +457,17 @@ def embed_watermark(
             block_size=block_size,
             dtcwt_levels=dtcwt_levels,
             HSw_list=np.array(HSw_list, dtype=object), 
+            
+             # padding metadata
+            orig_H=orig_H,
+            orig_W=orig_W,
+            pad_h=pad_h,
+            pad_w=pad_w,
+
+            # ✅ ACTUAL CUT DATA
+            bottom_pad=bottom_pad,
+            right_pad=right_pad,
+            corner_pad=corner_pad
         )
         
 

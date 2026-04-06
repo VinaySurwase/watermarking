@@ -45,7 +45,13 @@ def load_key(npz_path: str) -> EmbedKey:
         M                 = int(data["M"]),
         block_size        = int(data["block_size"]),
         dtcwt_levels      = int(data["dtcwt_levels"]),
-        HSw_list          = tuple(data["HSw_list"].tolist())
+        HSw_list          = tuple(data["HSw_list"].tolist()),
+        orig_H            = int(data["orig_H"]),
+        orig_W            = int(data["orig_W"]),
+        pad_h             = int(data["pad_h"]),
+        pad_w             = int(data["pad_w"]),
+        bottom_pad        = data["bottom_pad"],
+        right_pad         = data["right_pad"],
     )
 
 

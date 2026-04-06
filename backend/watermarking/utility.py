@@ -1,20 +1,39 @@
 import numpy as np
 from django.core.files.base import ContentFile
 import io
+import cv2
 
-def save_key_npz(key_data: dict):
-    """
-    key_data = {
-        'alpha_star': float,
-        'HSw_list': [...],
-        ...
-    }
-    """
+def reconstruct_full_image(cropped, key):
+    # return cropped
+    orig_H = key.orig_H
+    orig_W = key.orig_W
+    pad_h  = key.pad_h
+    pad_w  = key.pad_w
 
-    buffer = io.BytesIO()
+    H = orig_H + pad_h
+    W = orig_W + pad_w
 
-    np.savez(buffer, **key_data)
+    full = np.zeros((H, W), dtype=cropped.dtype)
 
-    buffer.seek(0)
+    # place original
+    full[:orig_H, :orig_W] = cropped
 
-    return ContentFile(buffer.read(), name="key.npz")
+    # restore pads
+    if pad_h > 0:
+        full[orig_H:H, :] = key.bottom_pad
+
+    if pad_w > 0:
+        full[:, orig_W:W] = key.right_pad
+
+    return full
+
+
+def getImg(image_path):
+
+    # Load grayscale image
+    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+
+    if img is None:
+        raise ValueError("Image not found or invalid path")
+
+    return img
