@@ -4,6 +4,7 @@ colorama==0.4.6
 contourpy==1.3.3
 cycler==0.12.1
 Django==6.0.3
+django-cors-headers==4.9.0
 djangorestframework==3.17.1
 djangorestframework_simplejwt==5.5.1
 dtcwt==0.14.0
