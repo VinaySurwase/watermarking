@@ -22,7 +22,7 @@ storage/
 # ── Keys / artifacts ────────────────────────────
 *.npz
 embed_key.npz
-
+*.png
 # ── Node / Frontend ─────────────────────────────
 node_modules/
 dist/
