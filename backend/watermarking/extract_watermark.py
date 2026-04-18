@@ -222,10 +222,39 @@ def extract_watermark(
     # =====================================================
     _tick(extraction, 88)
 
+    # W_norm = W_ext - W_ext.min()
+    # if W_norm.max() > 0:
+    #     W_norm /= W_norm.max()
+    # W_out = (W_norm * 255).astype(np.uint8)
+    
+    # Step 1: normalize to [0, 255]
     W_norm = W_ext - W_ext.min()
     if W_norm.max() > 0:
         W_norm /= W_norm.max()
-    W_out = (W_norm * 255).astype(np.uint8)
+    W_norm = (W_norm * 255).astype(np.uint8)
+
+    # Step 2: denoise — removes salt-and-pepper and gaussian noise
+    # h=10 is filter strength, adjust up if still noisy, down if blurring detail
+    W_denoised = cv2.fastNlMeansDenoising(W_norm, h=10, templateWindowSize=7, searchWindowSize=21)
+
+    # Step 3: sharpen edges using unsharp masking
+    gaussian = cv2.GaussianBlur(W_denoised, (0, 0), sigmaX=2)
+    W_sharp = cv2.addWeighted(W_denoised, 1.8, gaussian, -0.8, 0)
+
+    # Step 4: CLAHE — boosts local contrast, makes dark logo pop against background
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    W_contrast = clahe.apply(W_sharp)
+
+    # Step 5: Otsu threshold — converts grey background to clean white,
+    # logo pixels to clean black. Otsu auto-picks the best threshold.
+    _, W_binary = cv2.threshold(W_contrast, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Step 6: morphological cleanup — removes isolated noise specks
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    W_clean = cv2.morphologyEx(W_binary, cv2.MORPH_OPEN,  kernel, iterations=1)
+    W_clean = cv2.morphologyEx(W_clean,  cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    W_out = W_clean
 
     _save_png(output_path, W_out)
 
