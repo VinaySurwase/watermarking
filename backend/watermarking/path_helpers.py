@@ -35,6 +35,8 @@ def path_wm_encrypted(instance):
 def path_output(instance):
     return f"storage/output/user_{instance.user.id}/process_{instance.id}/watermarked_image.png"
 
+def path_original_watermarked(instance):
+    return f"storage/original_watermarked/user_{instance.user.id}/process_{instance.id}/original_watermarked_image.png"
 
 def path_key(instance):
     return f"storage/keys/user_{instance.user.id}/process_{instance.id}/key"
@@ -77,4 +79,11 @@ def path_verify_overlay(instance):
     return (
         f"storage/verify/user_{instance.user.id}"
         f"/verify_{instance.id}/tamper_overlay.png"
+    )
+
+def path_reconstructed_watermark(instance):
+    """Received image with red overlay on tampered regions."""
+    return (
+        f"storage/reconstructed_watermark/user_{instance.user.id}"
+        f"/reconstructed_watermark{instance.id}/reconstructed_watermark.png"
     )

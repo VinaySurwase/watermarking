@@ -140,6 +140,7 @@ def _print_summary(
 def verify_tamper(
     received_path: str,
     key: EmbedKey,
+    reconstructed_watermark : str,
     tamper_map_path: str = "tamper_map.png",
     overlay_path: str = "tamper_overlay.png",
     verification_id: int | None = None,
@@ -198,6 +199,8 @@ def verify_tamper(
 
     img_recv = getImg(received_path)  
     img_recv = reconstruct_full_image(img_recv,key)
+    
+    # _save_png(reconstructed_watermark, img_recv)
     
     # =====================================================
     # 🔹 STEP 2: forward pipeline

@@ -8,8 +8,59 @@ from rest_framework.response import Response
 from rest_framework import status
 from .embed_key import EmbedKey
 
+# def reconstruct_full_image(cropped, key):
+#     # return cropped
+#     orig_H = key.orig_H
+#     orig_W = key.orig_W
+#     pad_h  = key.pad_h
+#     pad_w  = key.pad_w
+
+#     H = orig_H + pad_h
+#     W = orig_W + pad_w
+
+#     full = np.zeros((H, W), dtype=cropped.dtype)
+
+#     # place original
+#     full[:orig_H, :orig_W] = cropped
+
+#     # restore pads
+#     if pad_h > 0:
+#         full[orig_H:H, :] = key.bottom_pad
+
+#     if pad_w > 0:
+#         full[:, orig_W:W] = key.right_pad
+
+#     return full
+
+# def reconstruct_full_image(cropped, key):
+#     orig_H = key.orig_H
+#     orig_W = key.orig_W
+#     pad_h  = key.pad_h
+#     pad_w  = key.pad_w
+
+#     H = orig_H + pad_h
+#     W = orig_W + pad_w
+
+#     full = np.zeros((H, W), dtype=cropped.dtype)
+
+#     # 1️⃣ Place original cropped image
+#     full[:orig_H, :orig_W] = cropped
+
+#     # 2️⃣ Bottom pad (excluding corner)
+#     if pad_h > 0 and key.bottom_pad is not None:
+#         full[orig_H:H, :orig_W] = key.bottom_pad[:, :orig_W]
+
+#     # 3️⃣ Right pad (excluding corner)
+#     if pad_w > 0 and key.right_pad is not None:
+#         full[:orig_H, orig_W:W] = key.right_pad[:orig_H, :]
+
+#     # 4️⃣ Corner pad (only if both exist)
+#     if pad_h > 0 and pad_w > 0 and key.corner_pad is not None:
+#         full[orig_H:H, orig_W:W] = key.corner_pad
+
+#     return full
+
 def reconstruct_full_image(cropped, key):
-    # return cropped
     orig_H = key.orig_H
     orig_W = key.orig_W
     pad_h  = key.pad_h
@@ -18,17 +69,12 @@ def reconstruct_full_image(cropped, key):
     H = orig_H + pad_h
     W = orig_W + pad_w
 
-    full = np.zeros((H, W), dtype=cropped.dtype)
-
-    # place original
+    # FIX BUG 5: always zero-pad — never re-attach the old watermarked
+    # padding strips from the key. Those strips carry a different watermark
+    # signal than the cropped region and corrupt the boundary blocks in the
+    # forward pipeline, introducing edge artifacts in the extracted watermark.
+    full = np.zeros((H, W), dtype=np.float32)
     full[:orig_H, :orig_W] = cropped
-
-    # restore pads
-    if pad_h > 0:
-        full[orig_H:H, :] = key.bottom_pad
-
-    if pad_w > 0:
-        full[:, orig_W:W] = key.right_pad
 
     return full
 
@@ -88,4 +134,6 @@ def load_key(npz_path: str) -> EmbedKey:
         pad_w             = int(data["pad_w"]),
         bottom_pad        = data["bottom_pad"],
         right_pad         = data["right_pad"],
+        corner_pad        = data["corner_pad"],
+        Sw_full           = data["Sw_full"]
     )

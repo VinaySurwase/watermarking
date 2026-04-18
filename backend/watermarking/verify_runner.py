@@ -23,7 +23,8 @@ from .path_helpers import (
     path_key,
     path_verify_received,
     path_verify_tamper_map,
-    path_verify_overlay
+    path_verify_overlay,
+    path_reconstructed_watermark
     )
 
 def run_verify_pipeline(verification_id: int) -> None:
@@ -59,6 +60,7 @@ def run_verify_pipeline(verification_id: int) -> None:
         received_path = path_verify_received(verification)
         tamper_map    = path_verify_tamper_map(verification)
         overlay       = path_verify_overlay(verification)
+        reconstructed_watermark = path_reconstructed_watermark(verification)
 
         # ── 4. Run algorithm ─────────────────────────────────
         result = verify_tamper(
@@ -66,6 +68,7 @@ def run_verify_pipeline(verification_id: int) -> None:
             key             = key,
             tamper_map_path = tamper_map,
             overlay_path    = overlay,
+            reconstructed_watermark  = reconstructed_watermark
         )
 
         verification.set_status(TamperVerification.Status.VERIFYING, 80)
